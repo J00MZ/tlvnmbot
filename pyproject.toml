@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "tlvnmbot"
+version = "0.1.0"
+description = "Get Tel Aviv Fast Lane price updates"
+authors = ["Joe Tavin <jtavin@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+aiohttp = "^3.10.5"
+coloredlogs = "^15.0.1"
+python-telegram-bot = "^21.5"
+
+[tool.poetry.group.dev.dependencies]
+bs4 = "^0.0.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

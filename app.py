@@ -1,76 +1,96 @@
+import logging
 import os
-import sqlite3
-import time
-from sqlite3 import Error
+from datetime import datetime as dt
 
-import requests
+import aiohttp
+import coloredlogs
 from bs4 import BeautifulSoup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+logger = logging.getLogger(__name__)
+LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
+coloredlogs.install(level=LOGLEVEL)
+TELEGRAM_TOKEN = os.getenv("TG_TOKEN")
+CHANNEL_ID = "@tlvnmupdates"
 
 
-def create_connection():
-    conn = None
-    db_file = os.path(os.environ.get("PWD") + "price.db")
-    try:
-        conn = sqlite3.connect(db_file)
-        if conn:
-            print(sqlite3.version)
-    except Error as e:
-        print(e)
+async def start(update, context):
+    """Handle the /start command"""
+    welcome_message = """
+    Hi! 👋 I'm the Tel Aviv Fast Lane bot! 🏎️🚙🛣️📈📉
+    Click /add_me for a link to the updates channel
+    Click /get_price to get price of the lane now
+    """
+    await update.message.reply_text(welcome_message)
 
-    if conn:
-        return conn
+
+async def add_to_channel(update, context):
+    """Add user to channel"""
+    user = update.message.from_user
+    user_id = user.id
+    await update.message.reply_text(f"Join channel {CHANNEL_ID} for regular updates.")
+    logger.info("Sent user %s link to channel %s", user_id, CHANNEL_ID)
+
+
+async def get_current_price(update, context):
+    """Scrape and parse price from website"""
+    logger.info("Scraping website...")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "https://fastlane.co.il/", auth=None, ssl=False
+        ) as response:
+            html_content = await response.text()
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    price_element = soup.find("span", {"id": "lblPrice"})
+    logger.info("Price element: %s", price_element)
+    if price_element:
+        price = price_element.text.strip()
+        logger.info("Fast Lane current price: %s", price)
+        await update.message.reply_text(
+            f"Fast Lane current price: {price} NIS as of {dt.now().strftime('%H:%M:%S')}"
+        )
     else:
-        return None
+        logger.warning("Price div not found")
+        await update.message.reply_text("Sorry, couldn't find the current price.")
 
 
-def create_table(conn):
-    try:
-        query = """CREATE TABLE IF NOT EXISTS PriceData (
-                    time text NOT NULL,
-                    price text NOT NULL
-                );"""
-        conn.execute(query)
-    except Error as e:
-        print(e)
+def validate_env_vars():
+    """Validate required environment variables"""
+    required_vars = ["TG_TOKEN"]
+    logger.info("Validating required environment variables")
+    for var in required_vars:
+        if not os.getenv(var):
+            raise ValueError(f"Missing required environment variable: {var}")
+    logger.info("Environment variables validated successfully")
 
 
-def send_message(text: str, chat_id: str, token: str):
-    base_url = (
-        f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={text}"
+async def echo(update, context):
+    """Echo the user message."""
+    await update.message.reply_text(
+        f"""You said: {update.message.text}
+        I don't understand that, but I'll pass it on!"""
     )
-    requests.get(base_url)
 
 
-def parse_price():
-    response = requests.get("https://fastlane.co.il/")
-    soup = BeautifulSoup(response.text, "html.parser")
-    price = soup.find("span", {"id": "lblPrice"}).text
-    print("bs found price: %s", price)
-    return price
+async def error(update, context):
+    """Log Errors caused by Updates."""
+    logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
 def main():
-    conn = create_connection()
-    create_table(conn)
+    """main function to start the bot"""
+    application = Application.builder().token(token=TELEGRAM_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("add_me", add_to_channel))
+    application.add_handler(CommandHandler("get_price", get_current_price))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    application.add_error_handler(error)
+    # application.add_handler(CallbackQueryHandler(button))
+    application.run_polling()
 
-    last_price = None
-    while True:
-        try:
-            current_price = parse_price()
-            if current_price != last_price:
-                send_message(f"New price: {current_price}", CHAT_ID, TOKEN)
-                last_price = current_price
 
-                # insert last_price into the database
-                with conn:
-                    query = """INSERT INTO PriceData(time, price) VALUES(?, ?);"""
-                    conn.execute(
-                        query, (time.strftime("%Y-%m-%d %H:%M:%S"), last_price)
-                    )
-
-        except Exception as e:
-            send_message(f"Error: {e}", "YourChatId", "YourBotToken")
-        time.sleep(300)  # wait for 5 minutes
+if __name__ == "__main__":
+    validate_env_vars()
+    logger.info("Starting bot... ")
+    main()
