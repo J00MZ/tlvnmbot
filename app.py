@@ -13,6 +13,8 @@ coloredlogs.install(level=LOGLEVEL)
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN")
 CHANNEL_ID = "@tlvnmupdates"
 
+last_price = None
+
 
 async def start(update, context):
     """Handle the /start command"""
@@ -32,9 +34,34 @@ async def add_to_channel(update, context):
     logger.info("Sent user %s link to channel %s", user_id, CHANNEL_ID)
 
 
-async def get_current_price(update, context):
+async def send_price_update(context):
+    """Send price update to the channel"""
+    price = await get_price()
+    if price:
+        message = f"Fast Lane current price: {price} NIS as of {dt.now().strftime('%H:%M:%S')}"
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
+    else:
+        logger.warning("Failed to get price for scheduled update")
+
+
+async def check_and_send_price_update(context):
+    """Check for price changes and send update if changed"""
+    global last_price
+    current_price = await get_price()
+
+    if current_price and current_price != last_price:
+        message = f"Fast Lane price update: {current_price} NIS as of {dt.now().strftime('%H:%M:%S')}"
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
+        last_price = current_price
+        logger.info(f"Price changed to {current_price}. Update sent.")
+    elif current_price is None:
+        logger.warning("Failed to get price for scheduled update")
+    else:
+        logger.info(f"Price unchanged at {current_price}. No update sent.")
+
+
+async def get_price():
     """Scrape and parse price from website"""
-    logger.info("Scraping website...")
     async with aiohttp.ClientSession() as session:
         async with session.get(
             "https://fastlane.co.il/", auth=None, ssl=False
@@ -43,15 +70,19 @@ async def get_current_price(update, context):
 
     soup = BeautifulSoup(html_content, "html.parser")
     price_element = soup.find("span", {"id": "lblPrice"})
-    logger.info("Price element: %s", price_element)
     if price_element:
-        price = price_element.text.strip()
-        logger.info("Fast Lane current price: %s", price)
+        return price_element.text.strip()
+    return None
+
+
+async def get_current_price(update, context):
+    """Handle the /get_price command"""
+    price = await get_price()
+    if price:
         await update.message.reply_text(
             f"Fast Lane current price: {price} NIS as of {dt.now().strftime('%H:%M:%S')}"
         )
     else:
-        logger.warning("Price div not found")
         await update.message.reply_text("Sorry, couldn't find the current price.")
 
 
@@ -81,6 +112,13 @@ async def error(update, context):
 def main():
     """main function to start the bot"""
     application = Application.builder().token(token=TELEGRAM_TOKEN).build()
+
+    # Add job queue
+    job_queue = application.job_queue
+    job_queue.run_repeating(
+        check_and_send_price_update, interval=300, first=10
+    )  # Run every 5 minutes, start after 10 seconds
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add_me", add_to_channel))
     application.add_handler(CommandHandler("get_price", get_current_price))
