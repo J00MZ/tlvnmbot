@@ -50,7 +50,7 @@ async def check_and_send_price_update(context):
     current_price = await get_price()
 
     if current_price and current_price != last_price:
-        message = f"Fast Lane price update: {current_price} NIS as of {dt.now().strftime('%H:%M:%S')}"
+        message = f"Fast Lane price: {current_price} NIS as of {dt.now().strftime('%H:%M:%S')}"
         await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
         last_price = current_price
         logger.info(f"Price changed to {current_price}. Update sent.")
@@ -99,8 +99,7 @@ def validate_env_vars():
 async def echo(update, context):
     """Echo the user message."""
     await update.message.reply_text(
-        f"""You said: {update.message.text}
-        I don't understand that, but I'll pass it on!"""
+        f"""You said: {update.message.text}\nI don't understand that, but I'll pass it on!"""
     )
 
 
